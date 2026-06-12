@@ -1,10 +1,22 @@
 [project]
-name = "notebooklm-assistant"
+name = "notebooklm-mcp"
 version = "0.1.0"
-description = "Add your description here"
+description = "MCP server exposing Google NotebookLM (via notebooklm-py) to Claude Desktop and Claude Code"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastmcp>=2.14.4",
-    "notebooklm-py[browser]>=0.3.1",
+    # notebooklm-py is reverse-engineered and moves fast; the tool code is
+    # hand-verified against the 0.3.x attribute/signature surface (see
+    # tests/test_drift.py), so block 0.4+ until re-verified.
+    "notebooklm-py[browser]>=0.3.1,<0.4",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
