@@ -26,6 +26,7 @@ from notebooklm._settings import SettingsAPI
 from notebooklm._sources import SourcesAPI
 from notebooklm.client import NotebookLMClient
 from notebooklm.types import (
+    Artifact,
     ArtifactType,
     AskResult,
     ChatMode,
@@ -46,6 +47,7 @@ import enums
 # (type, attributes accessed directly), getattr()-guarded access included —
 # a getattr fallback hides drift just as silently as a hard AttributeError.
 ATTRS_READ_BY_TOOLS = [
+    (Artifact, ["id", "title", "kind", "status"]),
     (Notebook, ["id", "title", "sources_count", "is_owner", "created_at"]),
     (Source, ["id", "title", "url", "kind", "status"]),
     (SourceFulltext, ["source_id", "title", "kind", "url", "char_count", "content"]),
