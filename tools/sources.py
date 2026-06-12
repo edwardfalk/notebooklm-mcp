@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from _runtime import get_client, mcp
+from enums import SOURCE_STATUS_LABELS, kind_label, status_label
 from errors import tool_errors, validate_path
+
+# Default window for get_source_fulltext. A full web page routinely indexes
+# to 50k+ characters, which overflows MCP tool-result limits; 20k is large
+# enough for most documents while staying well inside them.
+FULLTEXT_DEFAULT_MAX_CHARS = 20_000
 
 
 def _source_to_dict(source) -> dict:
@@ -12,8 +18,27 @@ def _source_to_dict(source) -> dict:
         "id": source.id,
         "title": source.title,
         "url": getattr(source, "url", None),
-        "kind": str(getattr(source, "kind", "")) or None,
-        "status": getattr(source, "status", None),
+        "kind": kind_label(getattr(source, "kind", None)),
+        "status": status_label(getattr(source, "status", None), SOURCE_STATUS_LABELS),
+    }
+
+
+def _window(content: str, offset: int, max_chars: int) -> dict:
+    """Slice ``content`` into a pagination window with continuation hints."""
+    if offset < 0:
+        raise ValueError("offset must be >= 0")
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive")
+    total = len(content)
+    chunk = content[offset : offset + max_chars]
+    end = offset + len(chunk)
+    return {
+        "char_count": total,
+        "offset": offset,
+        "returned_chars": len(chunk),
+        "truncated": end < total,
+        "next_offset": end if end < total else None,
+        "content": chunk,
     }
 
 
@@ -81,7 +106,7 @@ async def add_source_file(
 
 @mcp.tool()
 @tool_errors
-async def list_sources(notebook_id: str) -> list[dict]:
+async def list_sources(notebook_id: str) -> dict:
     """List every source in a notebook with id, title, URL, kind, and status.
 
     Essential for "surgical source selection" — call this to get the source
@@ -90,29 +115,39 @@ async def list_sources(notebook_id: str) -> list[dict]:
     """
     client = get_client()
     sources = await client.sources.list(notebook_id)
-    return [_source_to_dict(s) for s in sources]
+    return {"sources": [_source_to_dict(s) for s in sources]}
 
 
 @mcp.tool()
 @tool_errors
-async def get_source_fulltext(notebook_id: str, source_id: str) -> dict:
-    """Return the full indexed text of a single source.
+async def get_source_fulltext(
+    notebook_id: str,
+    source_id: str,
+    offset: int = 0,
+    max_chars: int = FULLTEXT_DEFAULT_MAX_CHARS,
+) -> dict:
+    """Return the indexed text of a single source, windowed by ``offset``/``max_chars``.
 
     Use this when the user wants to quote from a source verbatim, or when you
     need to verify what NotebookLM actually indexed (which can differ from
     the original document — PDFs lose formatting, YouTube returns
     transcripts, etc.).
+
+    Large sources (web pages routinely index to 50k+ characters) are paged:
+    the response carries ``char_count`` (total), ``truncated``, and
+    ``next_offset`` — pass ``next_offset`` back as ``offset`` to continue
+    reading. The default window is 20,000 characters.
     """
     client = get_client()
     fulltext = await client.sources.get_fulltext(notebook_id, source_id)
-    return {
+    result = {
         "source_id": fulltext.source_id,
         "title": fulltext.title,
-        "kind": str(getattr(fulltext, "kind", "")) or None,
+        "kind": kind_label(getattr(fulltext, "kind", None)),
         "url": getattr(fulltext, "url", None),
-        "char_count": getattr(fulltext, "char_count", None),
-        "content": fulltext.content,
     }
+    result.update(_window(fulltext.content or "", offset, max_chars))
+    return result
 
 
 @mcp.tool()

@@ -27,15 +27,19 @@ from notebooklm._sources import SourcesAPI
 from notebooklm.client import NotebookLMClient
 from notebooklm.types import (
     Artifact,
+    ArtifactStatus,
     ArtifactType,
     AskResult,
     ChatMode,
     ChatReference,
     GenerationStatus,
     Notebook,
+    NotebookDescription,
     ReportFormat,
     Source,
     SourceFulltext,
+    SourceStatus,
+    SuggestedTopic,
 )
 
 import enums
@@ -48,7 +52,9 @@ import enums
 # a getattr fallback hides drift just as silently as a hard AttributeError.
 ATTRS_READ_BY_TOOLS = [
     (Artifact, ["id", "title", "kind", "status"]),
-    (Notebook, ["id", "title", "sources_count", "is_owner", "created_at"]),
+    (Notebook, ["id", "title", "is_owner", "created_at"]),
+    (NotebookDescription, ["summary", "suggested_topics"]),
+    (SuggestedTopic, ["question"]),
     (Source, ["id", "title", "url", "kind", "status"]),
     (SourceFulltext, ["source_id", "title", "kind", "url", "char_count", "content"]),
     (GenerationStatus, ["task_id", "url", "error", "error_code", "is_complete", "is_failed"]),
@@ -117,6 +123,23 @@ def test_str_enum_literals_constructible(literal, enum_cls):
         enum_cls(value)
 
 
+@pytest.mark.parametrize(
+    "labels,enum_cls",
+    [
+        (enums.SOURCE_STATUS_LABELS, SourceStatus),
+        (enums.ARTIFACT_STATUS_LABELS, ArtifactStatus),
+    ],
+    ids=["SourceStatus", "ArtifactStatus"],
+)
+def test_status_labels_cover_all_members(labels, enum_cls):
+    # status_label degrades unknown codes to raw ints, so a new upstream
+    # status won't break listing — but this test forces a conscious label
+    # choice when one appears.
+    assert set(labels) == set(enum_cls), (
+        f"{enum_cls.__name__} members changed — update the label map in enums.py"
+    )
+
+
 def test_artifact_type_filter_values():
     # list_artifacts' docstring promises these filter strings.
     documented = {
@@ -136,7 +159,8 @@ def test_artifact_type_filter_values():
 API_SURFACE = [
     (NotebooksAPI, "list", []),
     (NotebooksAPI, "create", ["title"]),
-    (NotebooksAPI, "get_summary", ["notebook_id"]),
+    (NotebooksAPI, "get_description", ["notebook_id"]),
+    (NotebooksAPI, "get_summary", ["notebook_id"]),  # fallback parse path
     (NotebooksAPI, "rename", ["notebook_id", "new_title"]),
     (NotebooksAPI, "delete", ["notebook_id"]),
     (SourcesAPI, "add_url", ["notebook_id", "url", "wait", "wait_timeout"]),

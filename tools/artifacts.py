@@ -27,6 +27,7 @@ from notebooklm.types import ArtifactType, ReportFormat
 
 from _runtime import get_client, mcp
 from enums import (
+    ARTIFACT_STATUS_LABELS,
     AUDIO_FORMAT_MAP,
     AUDIO_LENGTH_MAP,
     INFOGRAPHIC_DETAIL_MAP,
@@ -49,7 +50,9 @@ from enums import (
     SlideDeckLengthLiteral,
     VideoFormatLiteral,
     VideoStyleLiteral,
+    kind_label,
     lookup_enum,
+    status_label,
 )
 from errors import prepare_output_path, tool_errors
 
@@ -107,10 +110,12 @@ async def generate_audio_overview(
     - ``source_ids``: restrict to a subset of sources for a focused overview.
     - ``language``: output language code (e.g. ``"en"``, ``"ja"``).
 
-    Returns ``{task_id, artifact_id, status}``. Audio takes 1-3 minutes
-    typically but can rate-limit — poll with ``check_artifact_status`` and
-    block briefly with ``wait_for_artifact``, then call
-    ``download_audio_artifact`` when ``status == "completed"``.
+    Returns ``{task_id, artifact_id, status}``. Audio typically takes 2-10
+    minutes (observed ~7 under load) and can rate-limit — poll with
+    ``check_artifact_status``, block briefly with ``wait_for_artifact``, and
+    if it's still running after one capped wait, yield to the user rather
+    than looping. Call ``download_audio_artifact`` when
+    ``status == "completed"``.
     """
     client = get_client()
     status = await client.artifacts.generate_audio(
@@ -372,7 +377,7 @@ async def generate_data_table(
 @tool_errors
 async def list_artifacts(
     notebook_id: str, artifact_type: str | None = None
-) -> list[dict]:
+) -> dict:
     """List generated artifacts in a notebook.
 
     ``artifact_type`` is an optional filter matching ``ArtifactType`` values:
@@ -392,15 +397,19 @@ async def list_artifacts(
             ) from exc
 
     artifacts = await client.artifacts.list(notebook_id, artifact_type=type_filter)
-    return [
-        {
-            "id": a.id,
-            "title": a.title,
-            "kind": str(getattr(a, "kind", "")) or None,
-            "status": getattr(a, "status", None),
-        }
-        for a in artifacts
-    ]
+    return {
+        "artifacts": [
+            {
+                "id": a.id,
+                "title": a.title,
+                "kind": kind_label(getattr(a, "kind", None)),
+                "status": status_label(
+                    getattr(a, "status", None), ARTIFACT_STATUS_LABELS
+                ),
+            }
+            for a in artifacts
+        ]
+    }
 
 
 @mcp.tool()
@@ -521,7 +530,11 @@ async def _download_with_guard(
 async def download_audio_artifact(
     notebook_id: str, output_path: str, artifact_id: str | None = None
 ) -> dict:
-    """Download a completed audio overview to a local ``.mp3`` file.
+    """Download a completed audio overview to a local file.
+
+    The bytes are an MP4/AAC (DASH) container even though it's "audio" —
+    prefer a ``.m4a`` extension (``.mp3`` also plays in most players but
+    mislabels the codec).
 
     ``output_path`` must be absolute and inside ``$HOME`` unless
     ``NOTEBOOKLM_MCP_ALLOW_ROOT=1`` is set. Parent directories are created

@@ -16,6 +16,49 @@ from enums import (
 from errors import tool_errors
 
 
+def _dedupe_references(references) -> list[dict]:
+    """Collapse NotebookLM's noisy reference list into distinct citations.
+
+    The raw API returns one entry per inline citation marker — a two-source
+    answer can carry 50 entries, most of them duplicates and many with no
+    ``cited_text`` at all. Keep the first occurrence of each distinct
+    (source_id, cited_text) pair, plus one bare entry for any source that
+    only ever appears without text (so no cited source is dropped).
+    """
+    deduped: list[dict] = []
+    seen_pairs: set[tuple] = set()
+    for ref in references:
+        if not ref.cited_text:
+            continue
+        key = (ref.source_id, ref.cited_text)
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        deduped.append(
+            {
+                "citation_number": ref.citation_number,
+                "cited_text": ref.cited_text,
+                "source_id": ref.source_id,
+            }
+        )
+    sources_with_text = {ref.source_id for ref in references if ref.cited_text}
+    seen_bare: set = set()
+    for ref in references:
+        if ref.cited_text or ref.source_id in sources_with_text:
+            continue
+        if ref.source_id in seen_bare:
+            continue
+        seen_bare.add(ref.source_id)
+        deduped.append(
+            {
+                "citation_number": ref.citation_number,
+                "cited_text": None,
+                "source_id": ref.source_id,
+            }
+        )
+    return deduped
+
+
 @mcp.tool()
 @tool_errors
 async def ask_notebook(
@@ -58,14 +101,7 @@ async def ask_notebook(
         "conversation_id": result.conversation_id,
         "turn_number": result.turn_number,
         "is_follow_up": result.is_follow_up,
-        "references": [
-            {
-                "citation_number": r.citation_number,
-                "cited_text": r.cited_text,
-                "source_id": r.source_id,
-            }
-            for r in result.references
-        ],
+        "references": _dedupe_references(result.references),
     }
 
 

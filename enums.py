@@ -19,6 +19,7 @@ from enum import Enum
 from typing import Iterable, Literal, TypeVar
 
 from notebooklm.types import (
+    ArtifactStatus,
     AudioFormat,
     AudioLength,
     ChatGoal,
@@ -29,6 +30,7 @@ from notebooklm.types import (
     QuizQuantity,
     SlideDeckFormat,
     SlideDeckLength,
+    SourceStatus,
     VideoFormat,
     VideoStyle,
 )
@@ -112,6 +114,52 @@ QUIZ_QUANTITY_MAP = _make_map(QuizQuantity)
 QUIZ_DIFFICULTY_MAP = _make_map(QuizDifficulty)
 CHAT_GOAL_MAP = _make_map(ChatGoal)
 CHAT_RESPONSE_LENGTH_MAP = _make_map(ChatResponseLength)
+
+
+# ---------------------------------------------------------------------------
+# Outbound serialization (library enums/ints -> clean strings for MCP output)
+# ---------------------------------------------------------------------------
+
+# Source.status and Artifact.status are raw ints in the library's dataclasses.
+# These label maps mirror the library's own status semantics (rpc/types.py);
+# ArtifactStatus.PROCESSING is labeled "in_progress" to stay consistent with
+# the strings GenerationStatus already uses in check_artifact_status.
+SOURCE_STATUS_LABELS: dict[int, str] = {
+    SourceStatus.PROCESSING: "processing",
+    SourceStatus.READY: "ready",
+    SourceStatus.ERROR: "error",
+    SourceStatus.PREPARING: "preparing",
+}
+
+ARTIFACT_STATUS_LABELS: dict[int, str] = {
+    ArtifactStatus.PROCESSING: "in_progress",
+    ArtifactStatus.PENDING: "pending",
+    ArtifactStatus.COMPLETED: "completed",
+    ArtifactStatus.FAILED: "failed",
+}
+
+
+def kind_label(kind: Enum | None) -> str | None:
+    """Serialize a SourceType/ArtifactType member to its lowercase value.
+
+    ``str(member)`` on these (str, Enum) classes yields ``"SourceType.PDF"``;
+    the ``.value`` is the clean ``"pdf"`` the LLM should see.
+    """
+    if kind is None:
+        return None
+    value = getattr(kind, "value", None)
+    return value if isinstance(value, str) else str(kind)
+
+
+def status_label(status: int | None, labels: dict[int, str]) -> str | int | None:
+    """Translate a raw status int into a readable label.
+
+    Unknown codes pass through unchanged rather than erroring — a new
+    upstream status should degrade to a visible int, not break listing.
+    """
+    if status is None:
+        return None
+    return labels.get(status, status)
 
 
 def lookup_enum(param_name: str, value: str | None, mapping: dict[str, E]) -> E | None:
